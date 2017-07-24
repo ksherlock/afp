@@ -1,6 +1,8 @@
 #include "resource_fork.h"
 #include "xattr.h"
 
+#include <cstring>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -97,12 +99,12 @@ namespace {
 	}
 #else
 	void set_or_throw_error(std::error_code *ec, const char *what) {
-		auto e = errno
+		auto e = errno;
 		set_or_throw_error(ec, e, what);
 	}
 
 	void set_or_throw_error(std::error_code *ec, const std::string &what) {
-		auto e = errno
+		auto e = errno;
 		set_or_throw_error(ec, e, what);
 	}
 
@@ -237,9 +239,9 @@ namespace afp {
 		return true;		
 	}
 #else
-	resource_fork::close() {
-		close(_fd);
-		_fd = -;1
+	void resource_fork::close() {
+		::close(_fd);
+		_fd = -1;
 	}
 #endif
 
@@ -256,9 +258,9 @@ namespace afp {
 			case write_only umode = O_WRONLY | O_CREAT; break;
 			case read_write: umode = O_RDWR | O_CREAT; break;
 		}
-		_fd = attropen(path.c_str(), XATTR_RESOURCEFORK_NAME, umode, 0666);
+		_fd = ::attropen(path.c_str(), XATTR_RESOURCEFORK_NAME, umode, 0666);
 		if (_fd < 0) {
-			set_or_throw_error(ec, "attropen");
+			set_or_throw_error(&ec, "attropen");
 			return false;
 		}
 		return true;
@@ -283,9 +285,9 @@ namespace afp {
 			case read_write: umode = O_RDWR | O_CREAT; break;
 		}
 
-		_fd = open(s.c_str(), umode, 0666);
+		_fd = ::open(s.c_str(), umode, 0666);
 		if (_fd < 0) {
-			set_or_throw_error(ec, "open");
+			set_or_throw_error(&ec, "open");
 			return false;
 		}
 		return true;
@@ -296,9 +298,9 @@ namespace afp {
 #ifdef FD_RESOURCE_FORK
 	size_t resource_fork::read(void *buffer, size_t n, std::error_code &) {
 		ec.clear();
-		auto rv = read(_fd, buffer, n);
+		auto rv = ::read(_fd, buffer, n);
 		if (rv < 0) {
-			set_or_throw_error(ec, "read");
+			set_or_throw_error(&ec, "read");
 			return 0;
 		}
 		return rv;
@@ -306,9 +308,9 @@ namespace afp {
 
 	size_t resource_fork::write(const void *buffer, size_t n, std::error_code &) {
 		ec.clear();
-		auto rv = write(_fd, buffer, n);
+		auto rv = ::write(_fd, buffer, n);
 		if (rv < 0) {
-			set_or_throw_error(ec, "write");
+			set_or_throw_error(&ec, "write");
 			return 0;
 		}
 		return rv;
@@ -316,8 +318,8 @@ namespace afp {
 
 	bool resource_fork::truncate(size_t pos, std::error_code &ec) {
 		ec.clear();
-		if (ftruncate(_fd, pos) < 0) {
-			set_or_throw_error(ec, "ftruncate");
+		if (::ftruncate(_fd, pos) < 0) {
+			set_or_throw_error(&ec, "ftruncate");
 			return false;
 		}
 		return true;
@@ -325,8 +327,8 @@ namespace afp {
 
 	bool resource_fork::seek(size_t pos, std::error_code &ec) {
 		ec.clear();
-		if (lseek(_fd, pos, SEEK_SET) < 0) {
-			set_or_throw_error(ec, "lseek");
+		if (::lseek(_fd, pos, SEEK_SET) < 0) {
+			set_or_throw_error(&ec, "lseek");
 			return false;
 		}
 		return true;
@@ -336,7 +338,7 @@ namespace afp {
 		ec.clear();
 		struct stat st;
 		if (fstat(_fd, &st) < 0) {
-			set_or_throw_error(ec, "fstat");
+			set_or_throw_error(&ec, "fstat");
 			return 0;
 		}
 		return st.st_size;
@@ -363,7 +365,7 @@ namespace afp {
 						if (errno == ENOATTR) {
 							return rv;
 						}
-						set_or_throw_error(ec, "size_xattr");
+						set_or_throw_error(&ec, "size_xattr");
 						return rv;
 					}
 					break;
@@ -373,7 +375,7 @@ namespace afp {
 				rv.resize(size);
 
 				for(;;) {
-					tsize = read_xattr(_fd, XATTR_RESOURCEFORK_NAME, tmp.data(), size);
+					tsize = read_xattr(_fd, XATTR_RESOURCEFORK_NAME, rv.data(), size);
 					if (tsize < 0) {
 						if (errno == EINTR) continue;
 						if (errno == ERANGE) break;
@@ -381,7 +383,7 @@ namespace afp {
 							rv.clear();
 							return rv;
 						}
-						set_or_throw_error(ec, "read_xattr");
+						set_or_throw_error(&ec, "read_xattr");
 						rv.clear();
 						return rv;
 					}
@@ -394,9 +396,9 @@ namespace afp {
 	bool resource_fork::open(const std::string &s, open_mode mode, std::error_code &ec) {
 		close();
 		ec.clear();
-		_fd = open(s.c_str(), O_RDONLY);
+		_fd = ::open(s.c_str(), O_RDONLY);
 		if (_fd < 0) {
-			set_or_throw_error(ec, "open");
+			set_or_throw_error(&ec, "open");
 			return false;
 		}
 		_mode = mode;
@@ -409,7 +411,7 @@ namespace afp {
 		ec.clear();
 		auto rv = size_xattr(_fd, XATTR_RESOURCEFORK_NAME);
 		if (rv < 0) {
-			set_or_throw_error(ec, "size_xattr");
+			set_or_throw_error(&ec, "size_xattr");
 			return 0;
 		}
 		return rv;
@@ -418,11 +420,11 @@ namespace afp {
 	size_t resource_fork::read(void *buffer, size_t n, std::error_code &ec) {
 		ec.clear();
 		if (_fd < 0) {
-			set_or_throw_error(ec, EBADF, "read");
+			set_or_throw_error(&ec, EBADF, "read");
 			return 0;
 		}
 		if (_mode == write_only) {
-			set_or_throw_error(ec, EPERM, "read");
+			set_or_throw_error(&ec, EPERM, "read");
 			return 0;
 		}
 
@@ -443,27 +445,27 @@ namespace afp {
 	size_t resource_fork::write(const void *buffer, size_t n, std::error_code &ec) {
 		ec.clear();
 		if (_fd < 0) {
-			set_or_throw_error(ec, EBADF, "write");
+			set_or_throw_error(&ec, EBADF, "write");
 			return 0;
 		}
 		if (_mode == read_only) {
-			set_or_throw_error(ec, EPERM, "write");
+			set_or_throw_error(&ec, EPERM, "write");
 			return 0;
 		}
 
 		if (n == 0) return 0;
 
 		auto tmp = read_rfork(_fd, ec);
-		if (ec) return ec;
+		if (ec) return 0;
 
 		if (_offset > tmp.size()) {
 			tmp.resize(_offset);
 		}
-		tmp.append((const uint8_t *)buffer, (const uint8_t *buffer) + n);
+		tmp.insert(tmp.end(), (const uint8_t *)buffer, (const uint8_t *)buffer + n);
 
 		auto rv = write_xattr(_fd, XATTR_RESOURCEFORK_NAME, tmp.data(), tmp.size());
 		if (rv < 0) {
-			set_or_throw_error(ec, "write_xattr");
+			set_or_throw_error(&ec, "write_xattr");
 			return 0;			
 		}
 		return n;
@@ -473,11 +475,11 @@ namespace afp {
 
 		ec.clear();
 		if (_fd < 0) {
-			set_or_throw_error(ec, EBADF, "resource_fork::truncate");
+			set_or_throw_error(&ec, EBADF, "resource_fork::truncate");
 			return 0;
 		}
 		if (_mode == read_only) {
-			set_or_throw_error(ec, EPERM, "resource_fork::truncate");
+			set_or_throw_error(&ec, EPERM, "resource_fork::truncate");
 			return 0;
 		}
 
@@ -485,7 +487,7 @@ namespace afp {
 		if (pos == 0) {
 			auto rv = remove_xattr(_fd, XATTR_RESOURCEFORK_NAME);
 			if (rv < 0) {
-				set_or_throw_error(ec, "remove_xattr");
+				set_or_throw_error(&ec, "remove_xattr");
 				return false;		
 			}
 			return true;
@@ -496,7 +498,7 @@ namespace afp {
 		tmp.resize(pos);
 		auto rv = write_xattr(_fd, XATTR_RESOURCEFORK_NAME, tmp.data(), pos);
 		if (rv < 0) {
-				set_or_throw_error(ec, "write_xattr");
+				set_or_throw_error(&ec, "write_xattr");
 				return false;
 		}
 		_offset = pos;
@@ -505,7 +507,7 @@ namespace afp {
 	bool resource_fork::seek(size_t pos, std::error_code &ec) {
 		ec.clear();
 		if (_fd < 0) {
-			set_or_throw_error(ec, EBADF, "truncate");
+			set_or_throw_error(&ec, EBADF, "truncate");
 			return 0;
 		}
 
