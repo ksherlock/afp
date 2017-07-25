@@ -38,10 +38,10 @@ namespace afp {
 		~finder_info();
 
 		finder_info(const finder_info &) = delete;
-		finder_info(finder_info &&) = delete;
+		finder_info(finder_info &&);
 
 		finder_info& operator=(const finder_info &) = delete;
-		finder_info& operator=(finder_info &&) = delete;
+		finder_info& operator=(finder_info &&);
 
 
 		bool read(const std::string &path, std::error_code &ec) {
@@ -117,14 +117,6 @@ namespace afp {
 	private:
 
 		void close();
-
-	#if defined(_WIN32)
-		bool write(void *handle, std::error_code &ec);
-		bool read(void *handle, std::error_code &ec);
-	#else
-		bool write(int fd, std::error_code &ec);
-		bool read(int fd, std::error_code &ec);
-	#endif
 
 		#if defined(_WIN32)
 		void *_fd = (void *)-1;
