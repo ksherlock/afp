@@ -37,6 +37,15 @@
 
 namespace {
 
+#ifdef ENOATTR
+	int remap_errno(int e) {
+		if (e == ENOATTR) return ENODATA;
+		return e;
+	}
+#else
+	int remap_errno(int e) { return e; }
+#endif
+
 	void set_or_throw_error(std::error_code *ec, int error, const std::string &what) {
 		if (ec) *ec = std::error_code(error, std::system_category());
 		else throw std::system_error(error, std::system_category(), what);

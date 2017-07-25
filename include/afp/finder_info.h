@@ -44,70 +44,64 @@ namespace afp {
 		finder_info& operator=(finder_info &&) = delete;
 
 
-		const uint8_t *data() const {
-	#if defined(_WIN32)
-			return _afp.finder_info;
-	#else
-			return _finder_info;
-	#endif
+		bool read(const std::string &path, std::error_code &ec) {
+			return open(path, read_only, ec);
 		}
 
-		uint8_t *data() {
-	#if defined(_WIN32)
-			return _afp.finder_info;
-	#else
-			return _finder_info;
-	#endif		
-		}
+		bool write(const std::string &path, std::error_code &ec);
 
-
-		bool read(const std::string &fname, std::error_code &ec) {
-			return open(fname, read_only, ec);
-		}
-
-		bool write(const std::string &fname, std::error_code &ec);
-
-		bool open(const std::string &fname, open_mode perm, std::error_code &ec);
-		bool open(const std::string &fname, std::error_code &ec) {
-			return open(fname, read_only, ec);
+		bool open(const std::string &path, open_mode perm, std::error_code &ec);
+		bool open(const std::string &path, std::error_code &ec) {
+			return open(path, read_only, ec);
 		}
 
 
 	#if defined(_WIN32)
-		bool read(const std::wstring &pathName, std::error_code &ec) {
-			return open(pathName, read_only, ec);
+		bool read(const std::wstring &path, std::error_code &ec) {
+			return open(path, read_only, ec);
 		}
 
-		bool write(const std::wstring &pathName, std::error_code &ec);
+		bool write(const std::wstring &path, std::error_code &ec);
 
-		bool open(const std::wstring &fname, open_mode perm, std::error_code &ec);
-		bool open(const std::wstring &fname, std::error_code &ec) {
-			return open(fname, read_only, ec);
+		bool open(const std::wstring &path, open_mode perm, std::error_code &ec);
+		bool open(const std::wstring &path, std::error_code &ec) {
+			return open(path, read_only, ec);
 		}
 
 	#endif
-
 
 		bool write(std::error_code &ec);
 
 		uint32_t creator_type() const;
 		uint32_t file_type() const;
 
+#if defined(_WIN32)
+		const uint8_t *data() const {
+			return _afp.finder_info;
+		}
+		uint8_t *data() {
+			return _afp.finder_info;
+		}
 		uint16_t prodos_file_type() const {
-			#if defined(_WIN32)
 			return _afp.prodos_file_type;
-			#else
-			return _prodos_file_type;
-			#endif
 		}
-
 		uint32_t prodos_aux_type() const {
-			#if defined(_WIN32)
 			return _afp.prodos_aux_type;
-			#else
-			return _prodos_aux_type;
-			#endif		
 		}
+#else
+		const uint8_t *data() const {
+			return _finder_info;
+		}
+		uint8_t *data() {
+			return _finder_info;
+		}
+		uint16_t prodos_file_type() const {
+			return _prodos_file_type;
+		}
+		uint32_t prodos_aux_type() const {
+			return _prodos_aux_type;
+		}
+#endif
 
 		void set_prodos_file_type(uint16_t);
 		void set_prodos_file_type(uint16_t, uint32_t);
@@ -117,6 +111,8 @@ namespace afp {
 
 		bool is_text() const;
 		bool is_binary() const;
+
+		void clear();
 
 	private:
 
