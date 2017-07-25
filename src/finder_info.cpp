@@ -1,9 +1,9 @@
 #include "finder_info.h"
 #include "xattr.h"
 
-#include <stdint.h>
-#include <string.h>
-#include <ctype.h>
+#include <cstdint>
+#include <cstring>
+#include <cctype>
 #include <string>
 
 #if defined (_WIN32)
@@ -37,8 +37,11 @@
 
 namespace {
 
+
+
 // ENOATTR is not standard enough, so use ENODATA.
 #if defined(ENOATTR) && ENOATTR != ENODATA
+
 	int remap_errno(int e) {
 		if (e == ENOATTR) return ENODATA;
 		return e;
@@ -208,28 +211,20 @@ namespace {
 		return true;
 	}
 
-	void set_or_throw_error(std::error_code *ec, int error, const std::string &what) {
-		if (ec) *ec = std::error_code(error, std::system_category());
-		else throw std::system_error(error, std::system_category(), what);
-	}
-
-
-
 
 #if defined(_WIN32)
 
-	/*
-	* allocating a new string could reset GetLastError() to 0.
-	*/
-	void set_or_throw_error(std::error_code *ec, const char *what) {
-		auto e = GetLastError();
-		set_or_throw_error(ec, e, what);
+	BOOL _(BOOL x, std::error_code &ec) {
+		if (!x) ec = std::error_code(GetLastError(), std::system_category());
+		return x;
 	}
 
-	void set_or_throw_error(std::error_code *ec, const std::string &what) {
-		auto e = GetLastError();
-		set_or_throw_error(ec, e, what);
+	HANDLE _(HANDLE x, std::error_code &ec) {
+		if (x == INVALID_HANDLE_VALUE)
+			ec = std::error_code(GetLastError(), std::system_category());
+		return x;
 	}
+
 
 	template<class ...Args>
 	HANDLE CreateFileX(const std::string &s, Args... args) {
@@ -242,44 +237,40 @@ namespace {
 	}
 
 	template<class StringType>
-	HANDLE CreateFileX(const StringType &s, afp::resource_fork::open_mode mode, std::error_code &ec) {
+	HANDLE CreateFileX(const StringType &s, afp::finder_info::open_mode mode, std::error_code &ec) {
 
 
 		DWORD access = 0;
 		DWORD create = 0;
 
 		switch (mode) {
-			case afp::resource_fork::read_only:
+			case afp::finder_info::read_only:
 				access = GENERIC_READ;
 				create = OPEN_EXISTING;
 				break;
-			case afp::resource_fork::read_write:
+			case afp::finder_info::read_write:
 				access = GENERIC_READ | GENERIC_WRITE;
 				create = OPEN_ALWAYS;
 				break;
-			case afp::resource_fork::write_only:
+			case afp::finder_info::write_only:
 				access = GENERIC_READ | GENERIC_WRITE; // we always read existing info on file.
 				create = OPEN_ALWAYS;
 				break;
 		}
 
-		HANDLE h =  CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr);
-
-		if (h == INVALID_HANDLE_VALUE) {
-			set_or_throw_error(&ec, "CreateFile");
-		}
-		return h;
+		return _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
 	}
 
 
 #else
 
-	void set_or_throw_error(std::error_code *ec, const std::string &what) {
-		auto e = errno;
-		set_or_throw_error(ec, e, what);
+	template<class T>
+	T _(T x, std::error_code &ec) {
+		if (x < 0) ec = std::error_code( remap_errno(errno), std::system_category());
+		return x;
 	}
 
-
+#endif
 
 
 #if defined(_WIN32)
@@ -354,7 +345,7 @@ void finder_info::close() {
 	if (_fd != INVALID_HANDLE_VALUE) CloseHandle(_fd);
 	_fd = INVALID_HANDLE_VALUE;
 }
-void _finder_info::clear() {
+void finder_info::clear() {
 	std::memset(&_afp, sizeof(_afp), 0);
 	afp_init(&_afp);
 }
@@ -367,7 +358,7 @@ void finder_info::close() {
 	if (_fd >= 0) ::close(_fd);
 	_fd = -1;
 }
-void _finder_info::clear() {
+void finder_info::clear() {
 	std::memset(&_finder_info, sizeof(+_finder_info), 0);
 	_prodos_file_type = 0;
 	_prodos_aux_type = 0;
@@ -406,20 +397,19 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 
 	// always read the data.
 	DWORD transferred = 0;
-	BOOL ok = ReadFile(_fd, _afp, sizeof(_afp), &transferred, nullptr);
-	auto e = GetLastError();
+	BOOL ok = _(ReadFile(_fd, &_afp, sizeof(_afp), &transferred, nullptr), ec);
 	if (mode == read_only) close();
 
-	if (!ok) {
+	if (ec) {
 		afp_init(&_afp);
-		set_or_throw_error(&ec, e, "ReadFile");
 		return false;
 	}
+
 	// warn if incorrect size or data.
 	if (transferred != sizeof(_afp) || !afp_verify(&_afp)) {
 		afp_init(&_afp);
 		if (mode != write_only) {
-			ec = std::errc::illegal_byte_sequence;
+			ec = std::make_error_code(std::errc::illegal_byte_sequence);
 			return false;
 		}
 	}
@@ -427,51 +417,45 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 }
 
 bool finder_info::write(std::error_code &ec) {
+
+	ec.clear();
+
 	LARGE_INTEGER ll;
 	BOOL ok;
 
 	ll.QuadPart = 0;
 
-	ok = SetFilePointerEx(_fd, ll, nullptr, FILE_BEGIN);
-	if (!ok) {
-		set_or_throw_error(&ec, "SetFilePointerEx");
-		return false;
-	}
+	ok = _(SetFilePointerEx(_fd, ll, nullptr, FILE_BEGIN), ec);
+	if (ec) return false;
 
-	ok = WriteFile(_fd, &_afp, sizeof(_afp), nullptr, nullptr);
-	if (!ok) {
-		set_or_throw_error(&ec, "WriteFile");
-		return false;
-	}
+	ok = _(WriteFile(_fd, &_afp, sizeof(_afp), nullptr, nullptr), ec);
+	if (ec) return false;
+
 	return true;
 }
 
 bool finder_info::write(const std::string &path, std::error_code &ec) {
 	BOOL ok;
 
+	ec.clear();
+
 	std::string s(path);
 	s += ":" XATTR_FINDERINFO_NAME;
 
-	HANDLE h = CreateFileX(s, 
+	HANDLE h = _(CreateFileX(s, 
 		GENERIC_WRITE, 
 		FILE_SHARE_READ, 
 		nullptr, 
 		CREATE_ALWAYS, 
 		FILE_ATTRIBUTE_NORMAL, 
-		nullptr);
+		nullptr), ec);
 
-	if (h == INVALID_HANDLE_VALUE) {
-		set_or_throw_error(&ec, "CreateFile");
-		return false;
-	}
+	if (ec) return false;
 
-	ok = WriteFile(h, &_afp, sizeof(_afp), nullptr, nullptr);
-	int e = GetLastError();
+	ok = _(WriteFile(h, &_afp, sizeof(_afp), nullptr, nullptr), ec);
 	CloseHandle(h);
-	if (!ok) {
-		set_or_throw_error(&ec, e, "WriteFile");
-		return false;
-	}
+	if (ec) return false;
+
 	return true;
 }
 
@@ -491,42 +475,30 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	// attropen is a front end for open / openat.
 	// do it ourselves so we can distinguish file doesn't exist vs attr doesn't exist.
 
-	int fd = open(path.c_str(), O_RDONLY);
-	if (fd < 0) {
-		set_or_throw_error(&ec, "open");
-		return false;
-	}
+	int fd = _(open(path.c_str(), O_RDONLY), ec);
+	if (ec) return false;
 
-	_fd = openat(fd, XATTR_FINDERINFO_NAME, umode | O_XATTR, 0666);
-	int e = remap_errno();
+	_fd = _(openat(fd, XATTR_FINDERINFO_NAME, umode | O_XATTR, 0666), ec);
 	::close(fd);
 
-	if (_fd < 0) {
-		if (e == ENOENT) e = ENODATA;
-		set_or_throw_error(&ec, e, "openat");
+	if (ec) {
+		if (ec.value() == ENOENT) ec = std::make_error_code(std::errc::no_message_available); // ENODATA.
 		return false;
 	}
 
 	if (mode == read_only || mode == read_write) {
 		// read it...
-		auto ok = ::pread(_fd, &_finder_info, 32, 0);
-		e = remap_errno();
+		auto ok = _(::pread(_fd, &_finder_info, 32, 0), ec);
 		if (mode == read_only) close();
-		if (ok < 0) {
-			set_or_throw_error(&ec, e, "pread");
-			return false;
-		}
+		if (ec) return false;
 	}
 	return true;
 }
 
 bool finder_info::write(std::error_code &ec) {
 	ec.clear();
-	auto ok = ::pwrite(_fd, &_finder_info, 32, 0);
-	if (ok < 0) {
-		set_or_throw_error(&ec, remap_errno(), "pwrite");
-		return false;
-	}
+	auto ok = _(::pwrite(_fd, &_finder_info, 32, 0), ec);
+	if (ec) return false;
 	return true;
 }
 
@@ -536,20 +508,11 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 	int e;
 
 	// attropen safe to use here.
-	int fd = attropen(path.c_str, XATTR_FINDERINFO_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0666);
-	e = remap_errno();
-	if (fd < 0) {
-		set_or_throw_error(&ec, e, "attropen");
-		return false;
-	}
-	auto ok = ::pwrite(fd, &_finder_info, 32, 0);
-	e = remap_errno();
+	int fd = _(::attropen(path.c_str, XATTR_FINDERINFO_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
+	if (ec) return false;
+	auto ok = _(::pwrite(fd, &_finder_info, 32, 0), ec);
 	::close(fd);
-
-	if (ok < 0) {
-		set_or_throw_error(&ec, e, "pwrite");
-		return false;
-	}
+	if (ec) return false;
 	return true;
 }
 #else
@@ -558,18 +521,13 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	close();
 	clear();
 
-	_fd = open(path.c_str(), O_RDONLY);
-	if (_fd < 0) {
-		set_or_throw_error(&ec, "open");
-		return false;
-	}
+	_fd = _(::open(path.c_str(), O_RDONLY), ec);
+	if (ec) return false;
 
 	if (mode == read_only || mode == read_write) {
-		auto ok = read_xattr(_fd, XATTR_FINDERINFO_NAME, 32);
-		e = remap_errno();
+		auto ok = _(::read_xattr(_fd, XATTR_FINDERINFO_NAME, &_finder_info, 32), ec);
 		if (mode == read_only) close();
-		if (ok < 0) {
-			set_or_throw_error(&ec, e, "read_xattr");
+		if (ec) {
 			return false;
 		}
 	}
@@ -579,30 +537,21 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 bool finder_info::write(std::error_code &ec) {
 	ec.clear();
 	// n.b. no way to differentiate closed vs opened read-only.
-	auto ok = write_xattr(_fd, XATTR_FINDERINFO_NAME, _finder_info, 32);
-	if (ok < 0) {
-		set_or_throw_error(&ec, remap_errno(), "write_xattr");
-		return false;
-	}
+	auto ok = _(::write_xattr(_fd, XATTR_FINDERINFO_NAME, _finder_info, 32), ec);
+	if (ec) return false;
 	return true;
 }
 
 bool finder_info::write(const std::string &path, std::error_code &ec) {
 	ec.clear();
 
-	int fd = open(path.c_str(), O_RDONLY);
-	if (fd < 0) {
-		set_or_throw_error(&ec, "open");
-		return false;
-	}
+	int fd = _(::open(path.c_str(), O_RDONLY), ec);
+	if (ec) return false;
 
-	auto ok = write_xattr(fd, XATTR_FINDERINFO_NAME, _finder_info, 32);
-	int e = remap_errno();
+	auto ok = _(::write_xattr(fd, XATTR_FINDERINFO_NAME, _finder_info, 32), ec);
 	::close(fd);
-	if (ok < 0) {
-		set_or_throw_error(&ec, e, "write_xattr");
-		return false;	
-	}
+	if (ec) return false;
+
 	return true;
 }
 
