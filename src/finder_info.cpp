@@ -42,11 +42,6 @@ namespace {
 // ENOATTR is not standard enough, so use ENODATA.
 #if defined(ENOATTR) && ENOATTR != ENODATA
 
-	int remap_errno(int e) {
-		if (e == ENOATTR) return ENODATA;
-		return e;
-	}
-
 	void remap_enoattr(std::error_code &ec) {
 		if (ec.value() == ENOATTR)
 			ec = std::make_error_code(std::errc:no_message_available);
@@ -54,9 +49,7 @@ namespace {
 #else
 	void remap_enoattr(std::error_code &ec) {}
 
-	int remap_errno(int e) { return e; }
 #endif
-	int remap_errno(void) { return remap_errno(errno); }
 
 
 
@@ -114,7 +107,7 @@ namespace {
 
 	template<class T>
 	T _(T x, std::error_code &ec) {
-		if (x < 0) ec = std::error_code( remap_errno(errno), std::system_category());
+		if (x < 0) ec = std::error_code(errno, std::system_category());
 		return x;
 	}
 
@@ -331,7 +324,7 @@ void afp_synchronize(struct AFP_Info *info, int trust) {
 	if (finder_info_to_filetype(info->finder_info, &f, &a)) {
 		if (f == info->prodos_file_type && a == info->prodos_aux_type) return;
 	}
-	
+
 	if (trust == trust_prodos)
 		file_type_to_finder_info(info->finder_info, info->prodos_file_type, info->prodos_aux_type);
 	else {
@@ -352,6 +345,21 @@ namespace afp {
 finder_info::finder_info() {
 	afp_init(&_afp);
 }
+finder_info::finder_info(finder_info &&rhs) {
+	std::swap(_fd, rhs._fd);
+	std::memcpy(&_afp, &rhs._afp, sizeof(_afp));
+}
+
+finder_info &finder_info::operator=(finder_info &&rhs) {
+	if (this != &rhs) {
+		close();
+		std::swap(_fd, rhs._fd);
+		std::memcpy(&_afp, &rhs._afp, sizeof(_afp));
+	}
+	return *this;
+}
+
+
 void finder_info::close() {
 	if (_fd != INVALID_HANDLE_VALUE) CloseHandle(_fd);
 	_fd = INVALID_HANDLE_VALUE;
@@ -365,6 +373,26 @@ void finder_info::clear() {
 finder_info::finder_info() {
 	memset(&_finder_info, 0, sizeof(_finder_info));
 }
+
+finder_info::finder_info(finder_info &&rhs) {
+	std::swap(_fd, rhs._fd);
+	std::memcpy(&_finder_info, &rhs._finder_info, sizeof(_finder_info));
+	_prodos_file_type = rhs._prodos_file_type;
+	_prodos_aux_type = rhs._prodos_aux_type;
+}
+
+finder_info &finder_info::operator=(finder_info &&rhs) {
+	if (this != &rhs) {
+		close();
+		std::swap(_fd, rhs._fd);
+		std::memcpy(&_finder_info, &rhs._finder_info, sizeof(_finder_info));
+		_prodos_file_type = rhs._prodos_file_type;
+		_prodos_aux_type = rhs._prodos_aux_type;
+	}
+	return *this;
+}
+
+
 void finder_info::close() {
 	if (_fd >= 0) ::close(_fd);
 	_fd = -1;
@@ -427,6 +455,48 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	return true;
 }
 
+bool finder_info::open(const std::wstring &path, open_mode mode, std::error_code &ec) {
+
+	ec.clear();
+	close();
+	clear();
+
+	std::wstring s(path);
+	s += L":" XATTR_FINDERINFO_NAME;
+
+	/* open the base file, then the finder info, so we can clarify the error */
+
+	HANDLE h = CreateFileX(path, read_only, ec);
+	if (ec) return false;
+	_fd = CreateFileX(s, mode, ec);
+	CloseHandle(h);
+	if (ec) {
+		if (ec.value() == ERROR_FILE_NOT_FOUND)
+			ec = std::make_error_code(std::errc::no_message_available);
+		return false;
+	}
+
+	// always read the data.
+	DWORD transferred = 0;
+	BOOL ok = _(ReadFile(_fd, &_afp, sizeof(_afp), &transferred, nullptr), ec);
+	if (mode == read_only) close();
+
+	if (ec) {
+		afp_init(&_afp);
+		return false;
+	}
+
+	// warn if incorrect size or data.
+	if (transferred != sizeof(_afp) || !afp_verify(&_afp)) {
+		afp_init(&_afp);
+		if (mode != write_only) {
+			ec = std::make_error_code(std::errc::illegal_byte_sequence);
+			return false;
+		}
+	}
+	return true;
+}
+
 bool finder_info::write(std::error_code &ec) {
 
 	ec.clear();
@@ -453,12 +523,12 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 	std::string s(path);
 	s += ":" XATTR_FINDERINFO_NAME;
 
-	HANDLE h = _(CreateFileX(s, 
-		GENERIC_WRITE, 
-		FILE_SHARE_READ, 
-		nullptr, 
-		CREATE_ALWAYS, 
-		FILE_ATTRIBUTE_NORMAL, 
+	HANDLE h = _(CreateFileX(s,
+		GENERIC_WRITE,
+		FILE_SHARE_READ,
+		nullptr,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,
 		nullptr), ec);
 
 	if (ec) return false;
@@ -469,6 +539,32 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 
 	return true;
 }
+
+bool finder_info::write(const std::wstring &path, std::error_code &ec) {
+	BOOL ok;
+
+	ec.clear();
+
+	std::wstring s(path);
+	s += L":" XATTR_FINDERINFO_NAME;
+
+	HANDLE h = _(CreateFileX(s,
+		GENERIC_WRITE,
+		FILE_SHARE_READ,
+		nullptr,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_NORMAL,
+		nullptr), ec);
+
+	if (ec) return false;
+
+	ok = _(WriteFile(h, &_afp, sizeof(_afp), nullptr, nullptr), ec);
+	CloseHandle(h);
+	if (ec) return false;
+
+	return true;
+}
+
 
 #elif defined(__sun__)
 bool finder_info::open(const std::string &path, open_mode mode, std::error_code &ec) {
@@ -540,6 +636,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 		auto ok = _(::read_xattr(_fd, XATTR_FINDERINFO_NAME, &_finder_info, 32), ec);
 		if (mode == read_only) close();
 		if (ec) {
+			remap_enoattr(ec);
 			return false;
 		}
 	}
@@ -550,7 +647,10 @@ bool finder_info::write(std::error_code &ec) {
 	ec.clear();
 	// n.b. no way to differentiate closed vs opened read-only.
 	auto ok = _(::write_xattr(_fd, XATTR_FINDERINFO_NAME, _finder_info, 32), ec);
-	if (ec) return false;
+	if (ec) {
+		remap_enoattr(ec);
+		return false;
+	}
 	return true;
 }
 
@@ -562,7 +662,10 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 
 	auto ok = _(::write_xattr(fd, XATTR_FINDERINFO_NAME, _finder_info, 32), ec);
 	::close(fd);
-	if (ec) return false;
+	if (ec) {
+		remap_enoattr(ec);
+		return false;
+	}
 
 	return true;
 }

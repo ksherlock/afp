@@ -124,14 +124,15 @@ namespace afp {
 	}
 
 	resource_fork& resource_fork::operator=(resource_fork &&rhs) {
-		close();
-		std::swap(_fd, rhs._fd);
+		if (this != &rhs) {
+			close();
+			std::swap(_fd, rhs._fd);
 
-		#if defined(__linux__) || defined(__FreeBSD__) || defined(_AIX)
-		std::swap(_offset, rhs._offset);
-		std::swap(_mode, rhs._mode);
-		#endif
-
+			#if defined(__linux__) || defined(__FreeBSD__) || defined(_AIX)
+			std::swap(_offset, rhs._offset);
+			std::swap(_mode, rhs._mode);
+			#endif
+		}
 		return *this;
 	}
 
@@ -235,7 +236,7 @@ namespace afp {
 
 		ok = _(SetFilePointerEx(_fd, ll, nullptr, FILE_BEGIN), ec);
 		if (ec) return false;
-		return true;		
+		return true;
 	}
 #else
 	void resource_fork::close() {
