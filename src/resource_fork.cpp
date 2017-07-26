@@ -6,7 +6,7 @@
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
-#define XATTR_RESOURCEFORK_NAME "AFP_ResourceFork"
+#define XATTR_RESOURCEFORK_NAME "AFP_Resource"
 #else
 #include <errno.h>
 #include <unistd.h>
