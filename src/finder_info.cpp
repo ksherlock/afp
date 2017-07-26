@@ -441,7 +441,8 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 
 	if (ec) {
 		afp_init(&_afp);
-		return false;
+		if (mode == read_only) return false;
+		return true; // there was an error but the file is still open.
 	}
 
 	// warn if incorrect size or data.
@@ -449,8 +450,8 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 		afp_init(&_afp);
 		if (mode != write_only) {
 			ec = std::make_error_code(std::errc::illegal_byte_sequence);
-			return false;
 		}
+		if (mode == read_only) return false;
 	}
 	return true;
 }
@@ -483,7 +484,8 @@ bool finder_info::open(const std::wstring &path, open_mode mode, std::error_code
 
 	if (ec) {
 		afp_init(&_afp);
-		return false;
+		if (mode == read_only) return false;
+		return true;
 	}
 
 	// warn if incorrect size or data.
@@ -491,8 +493,8 @@ bool finder_info::open(const std::wstring &path, open_mode mode, std::error_code
 		afp_init(&_afp);
 		if (mode != write_only) {
 			ec = std::make_error_code(std::errc::illegal_byte_sequence);
-			return false;
 		}
+		if (mode == read_only) return false;
 	}
 	return true;
 }
@@ -598,7 +600,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 		// read it...
 		auto ok = _(::pread(_fd, &_finder_info, 32, 0), ec);
 		if (mode == read_only) close();
-		if (ec) return false;
+		if (ec && mode == read_only) return false;
 	}
 	return true;
 }
@@ -637,7 +639,11 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 		if (mode == read_only) close();
 		if (ec) {
 			remap_enoattr(ec);
-			return false;
+			if (mode == read_only) return false;
+			if (ec.value() == EOPNOTSUPP) {
+				close();
+				return false;
+			}
 		}
 	}
 	return true;
