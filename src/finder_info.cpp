@@ -46,10 +46,80 @@ namespace {
 		if (e == ENOATTR) return ENODATA;
 		return e;
 	}
+
+	void remap_enoattr(std::error_code &ec) {
+		if (ec.value() == ENOATTR)
+			ec = std::make_error_code(std::errc:no_message_available);
+	}
 #else
+	void remap_enoattr(std::error_code &ec) {}
+
 	int remap_errno(int e) { return e; }
 #endif
 	int remap_errno(void) { return remap_errno(errno); }
+
+
+
+#if defined(_WIN32)
+
+	BOOL _(BOOL x, std::error_code &ec) {
+		if (!x) ec = std::error_code(GetLastError(), std::system_category());
+		return x;
+	}
+
+	HANDLE _(HANDLE x, std::error_code &ec) {
+		if (x == INVALID_HANDLE_VALUE)
+			ec = std::error_code(GetLastError(), std::system_category());
+		return x;
+	}
+
+
+	template<class ...Args>
+	HANDLE CreateFileX(const std::string &s, Args... args) {
+		return CreateFileA(s.c_str(), std::forward<Args>(args)...);
+	}
+
+	template<class ...Args>
+	HANDLE CreateFileX(const std::wstring &s, Args... args) {
+		return CreateFileW(s.c_str(), std::forward<Args>(args)...);
+	}
+
+	template<class StringType>
+	HANDLE CreateFileX(const StringType &s, afp::finder_info::open_mode mode, std::error_code &ec) {
+
+
+		DWORD access = 0;
+		DWORD create = 0;
+
+		switch (mode) {
+			case afp::finder_info::read_only:
+				access = GENERIC_READ;
+				create = OPEN_EXISTING;
+				break;
+			case afp::finder_info::read_write:
+				access = GENERIC_READ | GENERIC_WRITE;
+				create = OPEN_ALWAYS;
+				break;
+			case afp::finder_info::write_only:
+				access = GENERIC_READ | GENERIC_WRITE; // we always read existing info on file.
+				create = OPEN_ALWAYS;
+				break;
+		}
+
+		return _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
+	}
+
+
+#else
+
+	template<class T>
+	T _(T x, std::error_code &ec) {
+		if (x < 0) ec = std::error_code( remap_errno(errno), std::system_category());
+		return x;
+	}
+
+#endif
+
 
 	/*
 
@@ -212,65 +282,6 @@ namespace {
 	}
 
 
-#if defined(_WIN32)
-
-	BOOL _(BOOL x, std::error_code &ec) {
-		if (!x) ec = std::error_code(GetLastError(), std::system_category());
-		return x;
-	}
-
-	HANDLE _(HANDLE x, std::error_code &ec) {
-		if (x == INVALID_HANDLE_VALUE)
-			ec = std::error_code(GetLastError(), std::system_category());
-		return x;
-	}
-
-
-	template<class ...Args>
-	HANDLE CreateFileX(const std::string &s, Args... args) {
-		return CreateFileA(s.c_str(), std::forward<Args>(args)...);
-	}
-
-	template<class ...Args>
-	HANDLE CreateFileX(const std::wstring &s, Args... args) {
-		return CreateFileW(s.c_str(), std::forward<Args>(args)...);
-	}
-
-	template<class StringType>
-	HANDLE CreateFileX(const StringType &s, afp::finder_info::open_mode mode, std::error_code &ec) {
-
-
-		DWORD access = 0;
-		DWORD create = 0;
-
-		switch (mode) {
-			case afp::finder_info::read_only:
-				access = GENERIC_READ;
-				create = OPEN_EXISTING;
-				break;
-			case afp::finder_info::read_write:
-				access = GENERIC_READ | GENERIC_WRITE;
-				create = OPEN_ALWAYS;
-				break;
-			case afp::finder_info::write_only:
-				access = GENERIC_READ | GENERIC_WRITE; // we always read existing info on file.
-				create = OPEN_ALWAYS;
-				break;
-		}
-
-		return _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
-	}
-
-
-#else
-
-	template<class T>
-	T _(T x, std::error_code &ec) {
-		if (x < 0) ec = std::error_code( remap_errno(errno), std::system_category());
-		return x;
-	}
-
-#endif
 
 
 #if defined(_WIN32)
@@ -391,7 +402,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	CloseHandle(h);
 	if (ec) {
 		if (ec.value() == ERROR_FILE_NOT_FOUND)
-			ec = std::errc::no_message_available;
+			ec = std::make_error_code(std::errc::no_message_available);
 		return false;
 	}
 
@@ -475,14 +486,15 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	// attropen is a front end for open / openat.
 	// do it ourselves so we can distinguish file doesn't exist vs attr doesn't exist.
 
-	int fd = _(open(path.c_str(), O_RDONLY), ec);
+	int fd = _(::open(path.c_str(), O_RDONLY), ec);
 	if (ec) return false;
 
-	_fd = _(openat(fd, XATTR_FINDERINFO_NAME, umode | O_XATTR, 0666), ec);
+	_fd = _(::openat(fd, XATTR_FINDERINFO_NAME, umode | O_XATTR, 0666), ec);
 	::close(fd);
 
 	if (ec) {
-		if (ec.value() == ENOENT) ec = std::make_error_code(std::errc::no_message_available); // ENODATA.
+		if (ec.value() == ENOENT)
+			ec = std::make_error_code(std::errc::no_message_available); // ENODATA.
 		return false;
 	}
 
