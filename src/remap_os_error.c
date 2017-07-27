@@ -10,7 +10,11 @@ int remap_os_error(unsigned long e) {
 	
 	switch(e) {
 	case NO_ERROR: return 0;
-	default: return EIO;
+	default:
+	#ifdef ELAST
+		if (e > ELAST) return e;
+	#endif 
+		return EIO;
 
     case ERROR_INVALID_HANDLE:
     	return EBADF;
@@ -23,7 +27,6 @@ int remap_os_error(unsigned long e) {
     case ERROR_SEEK:
     case ERROR_WRITE_FAULT:
     	return EIO;
-
 
     case ERROR_ACCESS_DENIED:
     case ERROR_CANNOT_MAKE:
