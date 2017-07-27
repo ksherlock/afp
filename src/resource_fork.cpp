@@ -18,6 +18,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 #ifdef __APPLE_
@@ -58,16 +59,24 @@ namespace {
 
 
 
-#ifdef _WIN32
+#if defined(_WIN32)
+
+#ifdef MSVC
+#define AFP_ERROR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
+#define remap_os_error(x) x
+#else
+#define AFP_ERROR_FILE_NOT_FOUND ENOENT
+extern "C" int remap_os_error(unsigned long);
+#endif
 
 	BOOL _(BOOL x, std::error_code &ec) {
-		if (!x) ec = std::error_code(GetLastError(), std::system_category());
+		if (!x) ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
 		return x;
 	}
 
 	HANDLE _(HANDLE x, std::error_code &ec) {
 		if (x == INVALID_HANDLE_VALUE)
-			ec = std::error_code(GetLastError(), std::system_category());
+			ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
 		return x;
 	}
 
@@ -107,12 +116,66 @@ namespace {
 
 		return h;
 	}
+
+	DWORD GetFileAttributesX(const std::string &path) {
+		return GetFileAttributesA(path.c_str());
+	}
+	DWORD GetFileAttributesX(const std::wstring &path) {
+		return GetFileAttributesW(path.c_str());
+	}
+
+	template<class StringType>
+	bool regular_file(const StringType &path, std::error_code &ec) {
+
+		// make sure this isn't a directory.
+		DWORD st = GetFileAttributesX(path);
+		if (st == INVALID_FILE_ATTRIBUTES) {
+			ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
+			return false;
+		}
+		if (st & FILE_ATTRIBUTE_DIRECTORY) {
+			ec = std::make_error_code(std::errc::is_a_directory);
+			return false;
+		}
+		if (st & FILE_ATTRIBUTE_DEVICE) {
+			ec = std::make_error_code(std::errc::invalid_seek);
+			return false;
+		}
+		return true;
+	}
+
+
 #else
 
 	template<class T>
 	T _(T x, std::error_code &ec) {
 		if (x < 0) ec = std::error_code(errno, std::system_category());
 		return x;
+	}
+
+	bool regular_file(int fd, std::error_code &ec) {
+			struct stat st;
+			if (_(::fstat(fd, &st), ec) < 0) {
+				return false;
+			}
+			if (S_ISREG(st.st_mode)) return true;
+
+			if (S_ISDIR(st.st_mode)) {
+				ec = std::make_error_code(std::errc::is_a_directory);
+			} else {
+				ec = std::make_error_code(std::errc::invalid_seek); // ESPIPE.
+			}
+			return false;
+	}
+
+	/* opens a file read-only and verifies it's a regular file */
+	int openX(const std::string &path, std::error_code &ec) {
+		int fd = _(::open(path.c_str(), O_RDONLY | O_NONBLOCK), ec);
+		if (fd >= 0 && !regular_file(fd, ec)) {
+			::close(fd);
+			fd = -1;
+		}
+		return fd;
 	}
 
 #endif
@@ -150,6 +213,8 @@ namespace afp {
 		ec.clear();
 		close();
 
+		if (!regular_file(path, ec)) return false;
+
 		std::string s(path);
 		s += ":" XATTR_RESOURCEFORK_NAME;
 
@@ -158,7 +223,7 @@ namespace afp {
 		_fd = CreateFileX(s, mode, ec);
 		CloseHandle(h);
 		if (ec) {
-			if (ec.value() == ERROR_FILE_NOT_FOUND)
+			if (ec.value() == AFP_ERROR_FILE_NOT_FOUND)
 				ec = std::make_error_code(std::errc::no_message_available);
 			return false;
 		}
@@ -170,6 +235,8 @@ namespace afp {
 		ec.clear();
 		close();
 
+		if (!regular_file(path, ec)) return false;
+
 		std::wstring s(path);
 		s += L":" XATTR_RESOURCEFORK_NAME;
 
@@ -178,7 +245,7 @@ namespace afp {
 		_fd = CreateFileX(s, mode, ec);
 		CloseHandle(h);
 		if (ec) {
-			if (ec.value() == ERROR_FILE_NOT_FOUND)
+			if (ec.value() == AFP_ERROR_FILE_NOT_FOUND)
 				ec = std::make_error_code(std::errc::no_message_available);
 			return false;
 		}
@@ -265,7 +332,8 @@ namespace afp {
 			case write_only umode = O_WRONLY | O_CREAT; break;
 			case read_write: umode = O_RDWR | O_CREAT; break;
 		}
-		int fd = _(::open(path.c_str(), O_RDONLY),ec);
+
+		int fd = openX(path, ec);
 		if (ec) return false;
 
 		_fd = ::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, umode | O_XATTR, 0666);
@@ -292,7 +360,7 @@ namespace afp {
 		std::string s(path);
 		s += _PATH_RSRCFORKSPEC;
 
-		int fd = _(open(path.c_str(), O_RDONLY), ec);
+		int fd = openX(path, ec);
 		if (ec) return false;
 
 		int umode = 0;
@@ -384,17 +452,18 @@ namespace afp {
 			}
 		}
 	}
-	bool resource_fork::open(const std::string &s, open_mode mode, std::error_code &ec) {
+
+	bool resource_fork::open(const std::string &path, open_mode mode, std::error_code &ec) {
 		close();
 		ec.clear();
-		_fd = _(::open(s.c_str(), O_RDONLY), ec);
+
+		int fd = openX(path, ec);
 		if (ec) return false;
 
 		_mode = mode;
 		_offset = 0;
 		return true;
 	}
-
 
 	size_t resource_fork::size(std::error_code &ec) {
 		ec.clear();
