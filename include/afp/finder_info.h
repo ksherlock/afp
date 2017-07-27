@@ -6,8 +6,11 @@
 
 #include <system_error>
 
+#if defined(_WIN32) || defined(__CYGWIN__) || defined(__MSYS__)
+#define AFP_WIN32
+#endif
 
-#if defined(_WIN32)
+#if defined(AFP_WIN32)
 #pragma pack(push, 2)
 struct AFP_Info {
 	uint32_t magic;
@@ -56,7 +59,7 @@ namespace afp {
 		}
 
 
-	#if defined(_WIN32)
+	#if defined(AFP_WIN32)
 		bool read(const std::wstring &path, std::error_code &ec) {
 			return open(path, read_only, ec);
 		}
@@ -75,7 +78,7 @@ namespace afp {
 		uint32_t creator_type() const;
 		uint32_t file_type() const;
 
-#if defined(_WIN32)
+#if defined(AFP_WIN32)
 		const uint8_t *data() const {
 			return _afp.finder_info;
 		}
@@ -114,11 +117,12 @@ namespace afp {
 
 		void clear();
 
-	private:
-
 		void close();
 
-		#if defined(_WIN32)
+	private:
+
+
+		#if defined(AFP_WIN32)
 		void *_fd = (void *)-1;
 		AFP_Info _afp;
 		#else
@@ -130,6 +134,8 @@ namespace afp {
 		#endif
 	};
 
+
 }
+#undef AFP_WIN32
 
 #endif

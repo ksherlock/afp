@@ -6,6 +6,13 @@
 #include <cctype>
 #include <string>
 
+#if defined(__CYGWIN__) || defined(__MSYS__)
+#if !defined(_WIN32)
+#define _WIN32
+#endif
+#endif
+
+
 #if defined (_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -13,6 +20,7 @@
 #else
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 #endif
 
 #if defined(__APPLE__)
@@ -51,21 +59,27 @@ namespace {
 
 #endif
 
-
-
 #if defined(_WIN32)
 
+
+#ifdef MSVC
+#define AFP_ERROR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
+#define remap_os_error(x) x
+#else
+#define AFP_ERROR_FILE_NOT_FOUND ENOENT
+extern "C" int remap_os_error(unsigned long);
+#endif
+
 	BOOL _(BOOL x, std::error_code &ec) {
-		if (!x) ec = std::error_code(GetLastError(), std::system_category());
+		if (!x) ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
 		return x;
 	}
 
 	HANDLE _(HANDLE x, std::error_code &ec) {
 		if (x == INVALID_HANDLE_VALUE)
-			ec = std::error_code(GetLastError(), std::system_category());
+			ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
 		return x;
 	}
-
 
 	template<class ...Args>
 	HANDLE CreateFileX(const std::string &s, Args... args) {
@@ -79,7 +93,6 @@ namespace {
 
 	template<class StringType>
 	HANDLE CreateFileX(const StringType &s, afp::finder_info::open_mode mode, std::error_code &ec) {
-
 
 		DWORD access = 0;
 		DWORD create = 0;
@@ -102,6 +115,33 @@ namespace {
 		return _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
 	}
 
+	DWORD GetFileAttributesX(const std::string &path) {
+		return GetFileAttributesA(path.c_str());
+	}
+	DWORD GetFileAttributesX(const std::wstring &path) {
+		return GetFileAttributesW(path.c_str());
+	}
+
+	template<class StringType>
+	bool regular_file(const StringType &path, std::error_code &ec) {
+
+		// make sure this isn't a directory.
+		DWORD st = GetFileAttributesX(path);
+		if (st == INVALID_FILE_ATTRIBUTES) {
+			ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
+			return false;
+		}
+		if (st & FILE_ATTRIBUTE_DIRECTORY) {
+			ec = std::make_error_code(std::errc::is_a_directory);
+			return false;
+		}
+		if (st & FILE_ATTRIBUTE_DEVICE) {
+			ec = std::make_error_code(std::errc::invalid_seek);
+			return false;
+		}
+		return true;
+	}
+
 
 #else
 
@@ -109,6 +149,31 @@ namespace {
 	T _(T x, std::error_code &ec) {
 		if (x < 0) ec = std::error_code(errno, std::system_category());
 		return x;
+	}
+
+	bool regular_file(int fd, std::error_code &ec) {
+			struct stat st;
+			if (_(::fstat(fd, &st), ec) < 0) {
+				return false;
+			}
+			if (S_ISREG(st.st_mode)) return true;
+
+			if (S_ISDIR(st.st_mode)) {
+				ec = std::make_error_code(std::errc::is_a_directory);
+			} else {
+				ec = std::make_error_code(std::errc::invalid_seek); // ESPIPE.
+			}
+			return false;
+	}
+
+	/* opens a file read-only and verifies it's a regular file */
+	int openX(const std::string &path, std::error_code &ec) {
+		int fd = _(::open(path.c_str(), O_RDONLY, O_NONBLOCK), ec);
+		if (fd >= 0 && !regular_file(fd, ec)) {
+			::close(fd);
+			fd = -1;
+		}
+		return fd;
 	}
 
 #endif
@@ -423,13 +488,17 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	s += ":" XATTR_FINDERINFO_NAME;
 
 	/* open the base file, then the finder info, so we can clarify the error */
+	if (!regular_file(path, ec)) {
+		return false;
+	}
 
 	HANDLE h = CreateFileX(path, read_only, ec);
 	if (ec) return false;
+
 	_fd = CreateFileX(s, mode, ec);
 	CloseHandle(h);
 	if (ec) {
-		if (ec.value() == ERROR_FILE_NOT_FOUND)
+		if (ec.value() == AFP_ERROR_FILE_NOT_FOUND)
 			ec = std::make_error_code(std::errc::no_message_available);
 		return false;
 	}
@@ -466,13 +535,17 @@ bool finder_info::open(const std::wstring &path, open_mode mode, std::error_code
 	s += L":" XATTR_FINDERINFO_NAME;
 
 	/* open the base file, then the finder info, so we can clarify the error */
+	if (!regular_file(path, ec)) {
+		return false;
+	}
 
 	HANDLE h = CreateFileX(path, read_only, ec);
 	if (ec) return false;
+
 	_fd = CreateFileX(s, mode, ec);
 	CloseHandle(h);
 	if (ec) {
-		if (ec.value() == ERROR_FILE_NOT_FOUND)
+		if (ec.value() == AFP_ERROR_FILE_NOT_FOUND)
 			ec = std::make_error_code(std::errc::no_message_available);
 		return false;
 	}
@@ -584,7 +657,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	// attropen is a front end for open / openat.
 	// do it ourselves so we can distinguish file doesn't exist vs attr doesn't exist.
 
-	int fd = _(::open(path.c_str(), O_RDONLY), ec);
+	int fd = openX(path, ec);
 	if (ec) return false;
 
 	_fd = _(::openat(fd, XATTR_FINDERINFO_NAME, umode | O_XATTR, 0666), ec);
@@ -631,7 +704,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	close();
 	clear();
 
-	_fd = _(::open(path.c_str(), O_RDONLY), ec);
+	_fd = openX(path, ec);
 	if (ec) return false;
 
 	if (mode == read_only || mode == read_write) {

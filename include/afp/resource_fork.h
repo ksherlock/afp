@@ -4,6 +4,10 @@
 #include <string>
 #include <system_error>
 
+#if defined(_WIN32) || defined(__CYGWIN__) || defined(__MSYS__)
+#define AFP_WIN32
+#endif
+
 namespace afp {
 
 	class resource_fork {
@@ -26,7 +30,7 @@ namespace afp {
 		~resource_fork() { close(); }
 
 		static size_t size(const std::string &path, std::error_code &ec);
-#ifdef _WIN32
+#ifdef AFP_WIN32
 		static size_t size(const std::wstring &path, std::error_code &ec);
 #endif
 
@@ -36,7 +40,7 @@ namespace afp {
 			return open(s, read_only, ec);
 		}
 
-#ifdef _WIN32
+#ifdef AFP_WIN32
 		bool open(const std::wstring &s, open_mode mode, std::error_code &ec);
 		bool open(const std::wstring &s, std::error_code &ec) {
 			return open(s, read_only, ec);
@@ -53,7 +57,7 @@ namespace afp {
 
 
 	private:
-		#ifdef _WIN32
+		#ifdef AFP_WIN32
 		void *_fd = (void *)-1;
 		#else
 		int _fd = -1;
@@ -66,5 +70,6 @@ namespace afp {
 	};
 
 }
+#undef AFP_WIN32
 
 #endif
