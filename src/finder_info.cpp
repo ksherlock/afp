@@ -61,7 +61,6 @@ namespace {
 
 #if defined(_WIN32)
 
-
 #ifdef MSVC
 #define AFP_ERROR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
 #define remap_os_error(x) x
@@ -168,7 +167,7 @@ extern "C" int remap_os_error(unsigned long);
 
 	/* opens a file read-only and verifies it's a regular file */
 	int openX(const std::string &path, std::error_code &ec) {
-		int fd = _(::open(path.c_str(), O_RDONLY, O_NONBLOCK), ec);
+		int fd = _(::open(path.c_str(), O_RDONLY | O_NONBLOCK), ec);
 		if (fd >= 0 && !regular_file(fd, ec)) {
 			::close(fd);
 			fd = -1;
