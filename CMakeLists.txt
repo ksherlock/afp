@@ -1,14 +1,15 @@
 cmake_minimum_required(VERSION 3.1)
-
-set(PROJECT_NAME afp)
-set(PROJECT_TYPE CXX)
+project(afp VERSION 0.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 set(CMAKE_CXX_EXTENSIONS FALSE)
 
-if (CYGWIN OR MSYS OR MINGW)
-set(REMAP src/remap_os_error.c)
+
+if (WIN32 OR CYGWIN OR MSYS OR MINGW)
+	if (NOT MSVC)
+		set(REMAP src/remap_os_error.c)
+	endif()
 endif()
 
 add_library(afp src/finder_info.cpp src/resource_fork.cpp src/xattr.c ${REMAP})
