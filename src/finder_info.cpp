@@ -1,5 +1,4 @@
 #include "finder_info.h"
-#include "xattr.h"
 
 #include <cstdint>
 #include <cstring>
@@ -21,6 +20,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include "xattr.h"
 #endif
 
 #if defined(__APPLE__)
@@ -61,7 +61,7 @@ namespace {
 
 #if defined(_WIN32)
 
-#ifdef MSVC
+#ifdef _MSC_VER
 #define AFP_ERROR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
 #define remap_os_error(x) x
 #else
@@ -79,14 +79,14 @@ extern "C" int remap_os_error(unsigned long);
 			ec = std::error_code(remap_os_error(GetLastError()), std::system_category());
 		return x;
 	}
-
+#undef CreateFile
 	template<class ...Args>
-	HANDLE CreateFileX(const std::string &s, Args... args) {
+	HANDLE CreateFile(const std::string &s, Args... args) {
 		return CreateFileA(s.c_str(), std::forward<Args>(args)...);
 	}
 
 	template<class ...Args>
-	HANDLE CreateFileX(const std::wstring &s, Args... args) {
+	HANDLE CreateFile(const std::wstring &s, Args... args) {
 		return CreateFileW(s.c_str(), std::forward<Args>(args)...);
 	}
 
@@ -111,7 +111,7 @@ extern "C" int remap_os_error(unsigned long);
 				break;
 		}
 
-		return _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
+		return _(CreateFile(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
 	}
 
 	DWORD GetFileAttributesX(const std::string &path) {
@@ -597,7 +597,7 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 	std::string s(path);
 	s += ":" XATTR_FINDERINFO_NAME;
 
-	HANDLE h = _(CreateFileX(s,
+	HANDLE h = _(CreateFile(s,
 		GENERIC_WRITE,
 		FILE_SHARE_READ,
 		nullptr,
@@ -622,7 +622,7 @@ bool finder_info::write(const std::wstring &path, std::error_code &ec) {
 	std::wstring s(path);
 	s += L":" XATTR_FINDERINFO_NAME;
 
-	HANDLE h = _(CreateFileX(s,
+	HANDLE h = _(CreateFile(s,
 		GENERIC_WRITE,
 		FILE_SHARE_READ,
 		nullptr,

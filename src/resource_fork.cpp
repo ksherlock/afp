@@ -1,5 +1,4 @@
 #include "resource_fork.h"
-#include "xattr.h"
 
 #include <cstring>
 
@@ -19,6 +18,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include "xattr.h"
 #endif
 
 #ifdef __APPLE_
@@ -61,7 +61,7 @@ namespace {
 
 #if defined(_WIN32)
 
-#ifdef MSVC
+#ifdef _MSC_VER
 #define AFP_ERROR_FILE_NOT_FOUND ERROR_FILE_NOT_FOUND
 #define remap_os_error(x) x
 #else
@@ -80,13 +80,14 @@ extern "C" int remap_os_error(unsigned long);
 		return x;
 	}
 
+#undef CreateFile
 	template<class ...Args>
-	HANDLE CreateFileX(const std::string &s, Args... args) {
+	HANDLE CreateFile(const std::string &s, Args... args) {
 		return CreateFileA(s.c_str(), std::forward<Args>(args)...);
 	}
 
 	template<class ...Args>
-	HANDLE CreateFileX(const std::wstring &s, Args... args) {
+	HANDLE CreateFile(const std::wstring &s, Args... args) {
 		return CreateFileW(s.c_str(), std::forward<Args>(args)...);
 	}
 
@@ -112,7 +113,7 @@ extern "C" int remap_os_error(unsigned long);
 				break;
 		}
 
-		HANDLE h =  _(CreateFileX(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
+		HANDLE h =  _(CreateFile(s, access, FILE_SHARE_READ, nullptr, create, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
 
 		return h;
 	}
@@ -280,7 +281,7 @@ namespace afp {
 		LARGE_INTEGER ll = { };
 		BOOL ok = _(GetFileSizeEx(_fd, &ll), ec);
 		if (ec) return 0;
-		return ll.QuadPart;
+		return static_cast<size_t>(ll.QuadPart);
 	}
 
 	bool resource_fork::truncate(size_t pos, std::error_code &ec) {
