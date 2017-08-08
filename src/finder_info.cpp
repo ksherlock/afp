@@ -52,7 +52,7 @@ namespace {
 
 	void remap_enoattr(std::error_code &ec) {
 		if (ec.value() == ENOATTR)
-			ec = std::make_error_code(std::errc:no_message_available);
+			ec = std::make_error_code(std::errc::no_message_available);
 	}
 #else
 	void remap_enoattr(std::error_code &ec) {}

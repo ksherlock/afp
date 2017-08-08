@@ -21,9 +21,12 @@
 #include "xattr.h"
 #endif
 
-#ifdef __APPLE_
+#ifdef __APPLE__
 #include <sys/xattr.h>
 #include <sys/paths.h>
+#ifndef _PATH_RSRCFORKSPEC
+#define _PATH_RSRCFORKSPEC "/..namedfork/rsrc"
+#endif
 #endif
 
 #if defined(__linux__)
@@ -51,7 +54,7 @@ namespace {
 
 	void remap_enoattr(std::error_code &ec) {
 		if (ec.value() == ENOATTR)
-			ec = std::make_error_code(std::errc:no_message_available);
+			ec = std::make_error_code(std::errc::no_message_available);
 	}
 #else
 	void remap_enoattr(std::error_code &ec) {}
@@ -330,7 +333,7 @@ namespace afp {
 		int umode = 0;
 		switch(mode) {
 			case read_only: umode = O_RDONLY; break;
-			case write_only umode = O_WRONLY | O_CREAT; break;
+			case write_only: umode = O_WRONLY | O_CREAT; break;
 			case read_write: umode = O_RDWR | O_CREAT; break;
 		}
 
@@ -354,7 +357,7 @@ namespace afp {
 
 #ifdef __APPLE__
 	#define FD_RESOURCE_FORK
-	bool open(const std::string &path, open_mode mode, std::error_code &ec) {
+	bool resource_fork::open(const std::string &path, open_mode mode, std::error_code &ec) {
 		ec.clear();
 		close();
 
@@ -367,7 +370,7 @@ namespace afp {
 		int umode = 0;
 		switch(mode) {
 			case read_only: umode = O_RDONLY; break;
-			case write_only umode = O_WRONLY | O_CREAT; break;
+			case write_only: umode = O_WRONLY | O_CREAT; break;
 			case read_write: umode = O_RDWR | O_CREAT; break;
 		}
 
@@ -385,7 +388,7 @@ namespace afp {
 #endif
 
 #ifdef FD_RESOURCE_FORK
-	size_t resource_fork::read(void *buffer, size_t n, std::error_code &) {
+	size_t resource_fork::read(void *buffer, size_t n, std::error_code &ec) {
 		ec.clear();
 		auto rv = _(::read(_fd, buffer, n), ec);
 		if (ec) return 0;
@@ -393,7 +396,7 @@ namespace afp {
 		return rv;
 	}
 
-	size_t resource_fork::write(const void *buffer, size_t n, std::error_code &) {
+	size_t resource_fork::write(const void *buffer, size_t n, std::error_code &ec) {
 		ec.clear();
 		auto rv = _(::write(_fd, buffer, n), ec);
 		if (ec) return 0;
