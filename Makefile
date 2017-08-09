@@ -16,6 +16,10 @@ endif
 libafp.a : $(OBJS)
 	ar rcs $@ $^
 
+.PHONY : clean
+clean :
+	$(RM) libafp.a $(OBJS)
+
 o :
 	mkdir $@
 
