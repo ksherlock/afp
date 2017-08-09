@@ -4,12 +4,9 @@ CPPFLAGS = -I include/afp/
 
 OBJS = o/finder_info.o o/resource_fork.o
 
-# also cygwin...
-ifeq ($(MSYSTEM),MSYS)
+ifeq ($(OS),Windows_NT)
 	OBJS += o/remap_os_error.o
-endif
-
-ifneq ($(OS),Windows_NT)
+else
 	OBJS += o/xattr.o
 endif
 
@@ -33,3 +30,4 @@ o/%.o: src/%.c | o
 
 o/%.o: src/%.cpp | o
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c -o $@ $<
+
