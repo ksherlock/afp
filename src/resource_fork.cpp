@@ -461,7 +461,7 @@ namespace afp {
 		close();
 		ec.clear();
 
-		int fd = openX(path, ec);
+		_fd = openX(path, ec);
 		if (ec) return false;
 
 		_mode = mode;
