@@ -11,7 +11,7 @@ if (WIN32 OR CYGWIN OR MSYS OR MINGW)
 		set(REMAP src/remap_os_error.c)
 	endif()
 else()
-	set(XATTR srx/xattr.c)
+	set(XATTR src/xattr.c)
 endif()
 
 
