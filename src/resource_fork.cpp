@@ -449,7 +449,7 @@ namespace afp {
 		int fd = openX(path, ec);
 		if (ec) return false;
 
-		_fd = _(::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, umode | O_XATTR, 0666), ec);
+		_fd = _(::openat(fd, XATTR_RESOURCEFORK_NAME, umode | O_XATTR, 0666), ec);
 		::close(fd);
 
 		if (ec) {
@@ -473,7 +473,7 @@ namespace afp {
 		::close(fd);
 		if (ec) return false;
 
-		int ok = _(::unlinkat(dirfd, XATTR_RESOURCEFORK_NAME), ec);
+		int ok = _(::unlinkat(dirfd, XATTR_RESOURCEFORK_NAME, 0), ec);
 		::close(dirfd);
 
 		if (ec.value() == ENOENT) {
@@ -491,7 +491,7 @@ namespace afp {
 		int fd = openX(path, ec);
 		if (ec) return 0;
 
-		rfd = _(::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, O_WRONLY | O_CREAT | O_TRUNC | O_XATTR, 0666), ec);
+		int rfd = _(::openat(fd, XATTR_RESOURCEFORK_NAME, O_WRONLY | O_CREAT | O_TRUNC | O_XATTR, 0666), ec);
 		::close(fd);
 
 		if (ec) {
