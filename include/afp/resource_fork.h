@@ -30,9 +30,18 @@ namespace afp {
 		~resource_fork() { close(); }
 
 		static size_t size(const std::string &path, std::error_code &ec);
+		static bool remove(const std::string &path, std::error_code &ec);
+
+		static size_t write(const std::string &path, const void *buffer, size_t n, std::error_code &ec);
+
 #ifdef AFP_WIN32
 		static size_t size(const std::wstring &path, std::error_code &ec);
+		static bool remove(const std::wstring &path, std::error_code &ec);
+
+		static size_t write(const std::wstring &path, const void *buffer, size_t n, std::error_code &ec);
 #endif
+
+
 
 		bool open(const std::string &s, open_mode mode, std::error_code &ec);
 

@@ -84,6 +84,8 @@ extern "C" int remap_os_error(unsigned long);
 	}
 
 #undef CreateFile
+#undef DeleteFile
+
 	template<class ...Args>
 	HANDLE CreateFile(const std::string &s, Args... args) {
 		return CreateFileA(s.c_str(), std::forward<Args>(args)...);
@@ -120,6 +122,15 @@ extern "C" int remap_os_error(unsigned long);
 
 		return h;
 	}
+
+	BOOL DeleteFile(const std::string &path) { return DeleteFileA(path.c_str()); }
+	BOOL DeleteFile(const std::wstring &path) { return DeleteFileW(path.c_str()); }
+
+	template<class StringType>
+	bool DeleteFileX(const StringType &path, std::error_code &ec) {
+		return _(DeleteFile(path), ec);
+	}
+
 
 	DWORD GetFileAttributesX(const std::string &path) {
 		return GetFileAttributesA(path.c_str());
@@ -258,6 +269,104 @@ namespace afp {
 	}
 
 
+	size_t resource_fork::write(const std::string &path, const void *buffer, size_t n, std::error_code &ec) {
+
+		ec.clear();
+
+		if (!regular_file(path, ec)) return 0;
+
+		std::string s(path);
+		s += ":" XATTR_RESOURCEFORK_NAME;
+
+		HANDLE h = CreateFileX(path, read_only, ec);
+		if (ec) return 0;
+
+
+		HANDLE fd = _(CreateFile(s, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
+		if (ec) return 0;
+
+		DWORD transferred = 0;
+		BOOL ok = _(WriteFile(fd, buffer, n, &transferred, nullptr), ec);
+
+
+		CloseHandle(h);
+		CloseHandle(fd);
+
+
+		if (ec) return 0;
+		return transferred;
+	}
+
+	size_t resource_fork::write(const std::wstring &path, const void *buffer, size_t n, std::error_code &ec) {
+
+		ec.clear();
+
+		if (!regular_file(path, ec)) return 0;
+
+		std::wstring s(path);
+		s += L":" XATTR_RESOURCEFORK_NAME;
+
+		HANDLE h = CreateFileX(path, read_only, ec);
+		if (ec) return 0;
+
+
+		HANDLE fd = _(CreateFile(s, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr), ec);
+		if (ec) return 0;
+
+		DWORD transferred = 0;
+		BOOL ok = _(WriteFile(fd, buffer, n, &transferred, nullptr), ec);
+
+
+		CloseHandle(h);
+		CloseHandle(fd);
+
+
+		if (ec) return 0;
+		return transferred;
+	}
+
+
+	bool resource_fork::remove(const std::string &path, std::error_code &ec) {
+		ec.clear();
+
+		if (!regular_file(path, ec)) return false;
+
+		std::string s(path);
+		s += ":" XATTR_RESOURCEFORK_NAME;
+
+		HANDLE h = CreateFileX(path, read_only, ec);
+		if (ec) return false;
+		CloseHandle(h);
+
+		bool ok = DeleteFileX(s, ec);
+		if (ec.value() == ERROR_FILE_NOT_FOUND) {
+			ec = std::make_error_code(std::errc::no_message_available);
+			return true;
+		}
+		return ok;
+	}
+
+	bool resource_fork::remove(const std::wstring &path, std::error_code &ec) {
+		ec.clear();
+
+		if (!regular_file(path, ec)) return false;
+
+		std::wstring s(path);
+		s += L":" XATTR_RESOURCEFORK_NAME;
+
+		HANDLE h = CreateFileX(path, read_only, ec);
+		if (ec) return false;
+		CloseHandle(h);
+
+		bool ok = DeleteFileX(s, ec);
+		if (ec.value() == ERROR_FILE_NOT_FOUND) {
+			ec = std::make_error_code(std::errc::no_message_available);
+			return true;
+		}
+		return ok;
+	}
+
+
 	void resource_fork::close() {
 		CloseHandle(_fd);
 		_fd = INVALID_HANDLE_VALUE;
@@ -340,7 +449,7 @@ namespace afp {
 		int fd = openX(path, ec);
 		if (ec) return false;
 
-		_fd = ::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, umode | O_XATTR, 0666);
+		_fd = _(::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, umode | O_XATTR, 0666), ec);
 		::close(fd);
 
 		if (ec) {
@@ -351,6 +460,54 @@ namespace afp {
 
 		return true;
 	}
+
+	bool resource_fork::remove(const std::string &path, std::error_code &ec) {
+		ec.clear();
+
+
+		int fd = openX(path, ec);
+		if (ec) return false;
+
+		int dirfd = _(::openat(fd, ".", O_RDONLY | O_XATTR), ec);
+
+		::close(fd);
+		if (ec) return false;
+
+		int ok = _(::unlinkat(dirfd, XATTR_RESOURCEFORK_NAME), ec);
+		::close(dirfd);
+
+		if (ec.value() == ENOENT) {
+			ec = std::make_error_code(std::errc::no_message_available); // ENODATA.
+			return true;
+		}
+		return ok == 0;
+	}
+
+
+	size_t resource_fork::write(const std::string &path, const void *buffer, size_t n, std::error_code &ec) {
+
+		ec.clear();
+
+		int fd = openX(path, ec);
+		if (ec) return 0;
+
+		rfd = _(::openat(path.c_str(), XATTR_RESOURCEFORK_NAME, O_WRONLY | O_CREAT | O_TRUNC | O_XATTR, 0666), ec);
+		::close(fd);
+
+		if (ec) {
+			if (ec.value() == ENOENT)
+				ec = std::make_error_code(std::errc::no_message_available); // ENODATA.
+			return 0;
+		}
+
+		auto rv = _(::write(rfd, buffer, n), ec);
+		::close(rfd);
+		if (rv < 0) return 0;
+		return rv;
+	}
+
+
+
 
 #endif
 
@@ -383,6 +540,44 @@ namespace afp {
 		}
 
 		return true;
+	}
+
+	bool resource_fork::remove(const std::string &path, std::error_code &ec) {
+		ec.clear();
+
+		std::string s(path);
+		s += _PATH_RSRCFORKSPEC;
+
+		int fd = openX(path, ec);
+		if (ec) return false;
+		::close(fd);
+
+		int ok = _(::unlink(s.c_str()), ec);
+		if (ec.value() == ENOENT) {
+			ec = std::make_error_code(std::errc::no_message_available);
+			return true;
+		}
+		return ok == 0;
+	}
+
+	size_t resource_fork::write(const std::string &path, const void *buffer, size_t n, std::error_code &ec) {
+
+		ec.clear();
+
+		std::string s(path);
+		s += _PATH_RSRCFORKSPEC;
+
+		int fd = openX(path, ec);
+		if (ec) return false;
+		::close(fd);
+
+		int rfd = _(::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
+		if (rfd < 0) return 0;
+
+		auto rv = _(::write(rfd, buffer, n), ec);
+		::close(rfd);
+		if (rv < 0) return 0;
+		return rv;
 	}
 
 #endif
@@ -474,7 +669,7 @@ namespace afp {
 		auto rv = _(::size_xattr(_fd, XATTR_RESOURCEFORK_NAME), ec);
 		if (ec) {
 			remap_enoattr(ec);
-			return false;
+			return 0;
 		}
 		return rv;
 	}
@@ -574,6 +769,42 @@ namespace afp {
 		_offset = pos;
 		return true;
 	}
+
+
+	bool resource_fork::remove(const std::string &path, std::error_code &ec) {
+		ec.clear();
+
+		int fd = openX(path, ec);
+		if (ec) return false;
+
+		int rv = _(::remove_xattr(fd, XATTR_RESOURCEFORK_NAME), ec);
+		::close(fd);
+
+		if (rv < 0) {
+			remap_enoattr(ec);
+			if (ec.value() == ENODATA) return true;
+		}
+		return rv == 0;
+
+	}
+
+	size_t resource_fork::write(const std::string &path, const void *buffer, size_t n, std::error_code &ec) {
+		ec.clear();
+
+		int fd = openX(path, ec);
+		if (ec) return false;
+
+		auto rv = _(::write_xattr(fd, XATTR_RESOURCEFORK_NAME, buffer, n), ec);
+		::close(fd);
+
+		if (rv < 0) {
+			remap_enoattr(ec);
+			return 0;
+		}
+		return rv;
+	}
+
+
 
 
 #endif
