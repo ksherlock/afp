@@ -429,18 +429,18 @@ void finder_info::close() {
 	_fd = INVALID_HANDLE_VALUE;
 }
 void finder_info::clear() {
-	std::memset(&_afp, sizeof(_afp), 0);
+	std::memset(&_afp, 0, sizeof(_afp));
 	afp_init(&_afp);
 }
 
 #else
 finder_info::finder_info() {
-	memset(&_finder_info, 0, sizeof(_finder_info));
+	memset(_finder_info, 0, sizeof(_finder_info));
 }
 
 finder_info::finder_info(finder_info &&rhs) {
 	std::swap(_fd, rhs._fd);
-	std::memcpy(&_finder_info, &rhs._finder_info, sizeof(_finder_info));
+	std::memcpy(_finder_info, rhs._finder_info, sizeof(_finder_info));
 	_prodos_file_type = rhs._prodos_file_type;
 	_prodos_aux_type = rhs._prodos_aux_type;
 }
@@ -449,7 +449,7 @@ finder_info &finder_info::operator=(finder_info &&rhs) {
 	if (this != &rhs) {
 		close();
 		std::swap(_fd, rhs._fd);
-		std::memcpy(&_finder_info, &rhs._finder_info, sizeof(_finder_info));
+		std::memcpy(_finder_info, &rhs._finder_info, sizeof(_finder_info));
 		_prodos_file_type = rhs._prodos_file_type;
 		_prodos_aux_type = rhs._prodos_aux_type;
 	}
@@ -462,7 +462,7 @@ void finder_info::close() {
 	_fd = -1;
 }
 void finder_info::clear() {
-	std::memset(&_finder_info, sizeof(+_finder_info), 0);
+	std::memset(_finder_info, 0, sizeof(+_finder_info));
 	_prodos_file_type = 0;
 	_prodos_aux_type = 0;
 }
@@ -647,7 +647,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	clear();
 
 	int umode = 0;
-	switch(perm) {
+	switch(mode) {
 		case read_only: umode = O_RDONLY; break;
 		case read_write: umode = O_RDWR | O_CREAT; break;
 		case write_only: umode = O_WRONLY | O_CREAT | O_TRUNC; break;
@@ -670,16 +670,18 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 
 	if (mode == read_only || mode == read_write) {
 		// read it...
-		auto ok = _(::pread(_fd, &_finder_info, 32, 0), ec);
+		auto ok = _(::pread(_fd, _finder_info, 32, 0), ec);
 		if (mode == read_only) close();
 		if (ec && mode == read_only) return false;
+
+		finder_info_to_filetype(_finder_info, &_prodos_file_type, &_prodos_aux_type);
 	}
 	return true;
 }
 
 bool finder_info::write(std::error_code &ec) {
 	ec.clear();
-	auto ok = _(::pwrite(_fd, &_finder_info, 32, 0), ec);
+	auto ok = _(::pwrite(_fd, _finder_info, 32, 0), ec);
 	if (ec) return false;
 	return true;
 }
@@ -690,9 +692,9 @@ bool finder_info::write(const std::string &path, std::error_code &ec) {
 	int e;
 
 	// attropen safe to use here.
-	int fd = _(::attropen(path.c_str, XATTR_FINDERINFO_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
+	int fd = _(::attropen(path.c_str(), XATTR_FINDERINFO_NAME, O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
 	if (ec) return false;
-	auto ok = _(::pwrite(fd, &_finder_info, 32, 0), ec);
+	auto ok = _(::pwrite(fd, _finder_info, 32, 0), ec);
 	::close(fd);
 	if (ec) return false;
 	return true;
@@ -707,7 +709,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 	if (ec) return false;
 
 	if (mode == read_only || mode == read_write) {
-		auto ok = _(::read_xattr(_fd, XATTR_FINDERINFO_NAME, &_finder_info, 32), ec);
+		auto ok = _(::read_xattr(_fd, XATTR_FINDERINFO_NAME, _finder_info, 32), ec);
 		if (mode == read_only) close();
 		if (ec) {
 			remap_enoattr(ec);
@@ -717,6 +719,7 @@ bool finder_info::open(const std::string &path, open_mode mode, std::error_code 
 				return false;
 			}
 		}
+		finder_info_to_filetype(_finder_info, &_prodos_file_type, &_prodos_aux_type);
 	}
 	return true;
 }
