@@ -462,7 +462,7 @@ void finder_info::close() {
 	_fd = -1;
 }
 void finder_info::clear() {
-	std::memset(_finder_info, 0, sizeof(+_finder_info));
+	std::memset(_finder_info, 0, sizeof(_finder_info));
 	_prodos_file_type = 0;
 	_prodos_aux_type = 0;
 }
