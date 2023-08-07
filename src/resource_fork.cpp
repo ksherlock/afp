@@ -571,7 +571,7 @@ namespace afp {
 		if (ec) return false;
 		::close(fd);
 
-		int rfd = _(::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
+		int rfd = _(::open(s.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666), ec);
 		if (rfd < 0) return 0;
 
 		auto rv = _(::write(rfd, buffer, n), ec);
