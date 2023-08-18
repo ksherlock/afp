@@ -817,4 +817,8 @@ void finder_info::set_creator_type(uint32_t x) {
 	_finder_info[7] = x >> 0;
 }
 
+void finder_info::set_data(const uint8_t *data, unsigned length) {
+	memcpy(_finder_info, data, std::min(32u, length));
+}
+
 }

@@ -106,6 +106,8 @@ namespace afp {
 		}
 #endif
 
+		void set_data(const uint8_t *data, unsigned length=32);
+
 		void set_prodos_file_type(uint16_t);
 		void set_prodos_file_type(uint16_t, uint32_t);
 
