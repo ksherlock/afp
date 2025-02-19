@@ -1,6 +1,7 @@
 #include "resource_fork.h"
 
 #include <cstring>
+#include <cstdint>
 
 #if defined(__CYGWIN__) || defined(__MSYS__)
 #if !defined(_WIN32)
